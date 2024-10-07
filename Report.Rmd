@@ -1,0 +1,92 @@
+---
+title: "The Effect of DST on Crime in Vancouver"
+author: "Stephen Min"
+date: "April 2024"
+output: pdf_document
+urlcolor: blue
+abstract: "This report investigates the effect of Daylight Saving Time (DST) on crime rates in Vancouver using a regression discontinuity design. The results show no statistically significant impact of DST on either property or violent crime rates in Vancouver. Robustness checks were conducted to ensure the validity of the methodology."
+header-includes:
+  \usepackage{abstract}
+  \renewcommand{\abstractname}{Summary}
+  \setlength{\abstitleskip}{-20pt}
+fontsize: 12pt
+bibliography: references.bib
+---
+
+# Introduction
+
+This is an analysis inspired by @doleac2015. The premise is that Daylight Saving Time (DST) represents an exogenous increase in ambient light during a typical day, which might lead to a higher chance of criminals being caught, thus potentially lowering crime rates. However, as @doleac2015 point out, it's possible that this higher level of ambient light causes people to spend more time outdoors, resulting in more potential victims for criminals. The effect of DST is thus unknown without empirical work.
+
+The original paper found that DST decreased crime rates, particularly for robbery and rape, in the United States, but we cannot easily generalize the results to cities in Canada for a variety of reasons such as different baseline levels of ambient light, different infrastructure, different crime patterns, etc. This motivates an application of the methodology of @doleac2015 to analyze the effect of DST on crime rates in Vancouver.
+
+```{r setup, include=FALSE}
+knitr::read_chunk("Script.R")
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(patchwork)
+library(kableExtra)
+library(ggdag)
+library(broom)
+```
+
+# Empirical Strategy
+
+Since DST is a sudden shift of the clock forward at a specific date each year, a viable strategy would be to use a regression discontinuity design (RDD) with the running variable being days from the start of DST. The idea is that if DST actually has an effect on crime, then the sudden shift in ambient light will cause a detectable shift in crime rates. However, there are a couple of confounding variables that must be addressed.
+
+First, since DST affects crime through the amount of ambient light in a day, weather patterns would have to be accounted for since they affect both the amount of light and the crime rate. Similarly, DST always falls on a Sunday, meaning that the day of the week is another confounding variable since crime patterns may be different on a Sunday compared to other days. The diagram below represents these two problems graphically.
+
+```{r DAG, echo=FALSE}
+```
+
+To deal with these two issues, the estimating equation incorporates average temperature, rainfall levels, and day-of-week fixed effects: 
+\begin{equation} \label{eq:model}
+crime = \alpha + \beta_1 day + \beta_2 DST + \beta_3 DST * day + \delta W + \gamma_{dow}
+\end{equation} 
+$W$ refers to the weather variables – average temperature and rainfall – while $\gamma$ is the day-of-week fixed effect. An initial bandwidth of 60 days will be used for the RDD, but different bandwidths will be tested for robustness checks later on.
+
+# Data
+
+```{r import data, include=FALSE}
+merged_data_clean <- read_csv("Data/Processed/merged_data_clean.csv")
+```
+
+Crime data comes from the Vancouver Police Department (VPD) website (<https://geodash.vpd.ca/opendata/>) while the weather data comes from the Vancouver Weatherstats website (<https://vancouver.weatherstats.ca/>). The table below shows the first 10 entries of the data set used for analysis, created by merging the raw crime and weather data, cleaning it, and creating relevant variables.
+
+```{r Table, echo=FALSE}
+```
+
+Note that the units for rainfall are mm, and Sunday is considered the first day of the week for the Day of Week column. The raw data was split into various types of theft, homicide, and offenses against another person. Because of this low level of granularity, the crimes were aggregated into just property crimes and violent crimes.
+
+# Results
+
+Before presenting the results of the RDD estimation, a graph of the average crimes for each day will be shown as an initial heuristic to see if there's any obvious change in crime rates before and after the start of DST.
+
+```{r Plots, echo=FALSE, message=FALSE}
+```
+
+At first glance, DST doesn't appear to affect crime rates much. However, to confirm whether this initial assessment is accurate, a proper estimation using \eqref{eq:model} is necessary. The relevant results are displayed in the table below.
+
+```{r Model Estimation, echo=FALSE}
+```
+
+The estimates of the effect of DST are close to zero, and as the p-values indicate, it appears that the null hypothesis that DST has no effect on crime cannot be rejected. In other words, DST seems to have no effect on crime in Vancouver.
+
+# Robustness Checks
+
+It's possible that the functional form of \eqref{eq:model} and the bandwidth choice of 60 days are biasing the results. To examine whether the results are consistent, a cubic functional form will be tested with the original bandwidth, and a smaller bandwidth of 14 days will be used with the original model.
+
+```{r Robustness Check, echo=FALSE}
+```
+
+None of the other models give significant results for the effect of DST on crime. The results of the original model appear to be fairly robust.
+
+# Discussion
+
+In contrast to the finding that DST decreased crime rates in the United States, this analysis suggests that DST does not have such an effect in Vancouver. The reason for this difference is unknown, as it could be due to many factors such as those mentioned in the introduction (different baseline levels of ambient light, different infrastructure, different crime patterns, etc.). 
+
+It's also possible that the aggregation of different types of crime into the two overarching categories of "property crime" and "violent crime" masks any effect that DST may have on the individual types of crime. For example, it might be the case that certain types of robberies become less common due to DST while other types become more common. Testing whether this possibility is an issue requires more granularity of the data.
+
+\newpage
+
+# References
