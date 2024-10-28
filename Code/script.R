@@ -1,10 +1,11 @@
 library(tidyverse)
 library(lubridate)
-library(ggplot2)
 library(patchwork)
 library(kableExtra)
-library(ggdag)
 library(broom)
+### This is for the qmd file of my blog post.
+# library(quartoExtra)
+
 
 # ---- Merge Data ----
 
@@ -62,29 +63,15 @@ merged_data_clean <- merged_data %>%
 
 write_csv(merged_data_clean, "Data/Processed/merged_data_clean.csv")
 
-# ---- DAG ----
-
-coord_dag <- list(
-  x = c(DST = 0, light = 2, crime = 4, day = 2, weather = 3 ),
-  y = c(DST = 0, light = 0, crime = 0, day = 0.5, weather = -0.5 )
-)
-
-dag <- dagify(
-  crime ~ light + weather + day, # Y = crime, X = light, W = DST, Z = rain, V = day of week
-  light ~ weather + DST,
-  DST ~ day,
-  exposure = "DST",
-  outcome = "crime",
-  coords = coord_dag
-)
-ggdag_status(dag, node_size = 20) + theme_dag()
-
 # ---- Table ----
 
+merged_data_clean <- read_csv("Data/Processed/merged_data_clean.csv")
+
+# Show first 10 rows of cleaned data
 data_summary <- merged_data_clean %>%
   select(date, num_property_crime_perht, num_violent_crime_perht, 
          avg_temperature, rain, days_from_dst, dst_dummy, day_of_week) %>%
-  head(10)  # Show first 10 rows
+  head(10)  
 
 kbl(data_summary,
     col.names = (c("Date", "Property Crime per 100k", "Violent Crime per 100k",
@@ -95,10 +82,19 @@ kbl(data_summary,
     linesep = "",
     digits = 3,
     caption = "First 10 Rows of Cleaned Data") %>%
-  kable_styling(latex_options = c("striped", "hold_position", "scale_down"))
+  column_spec(1, width = "8em") %>%
+  column_spec(2, width = "8em") %>%
+  column_spec(3, width = "8em")
 
 # ---- Plots ----
 
+### This is also for my blog post. Not needed if running this script independently.
+# darkmode_theme_set(
+#   dark = ggthemes::theme_stata(scheme = "s1rcolor"),
+#   light = ggthemes::theme_stata(scheme = "s1color")
+# )
+
+# Grouping crime into average per day so that the graphs are readable. Otherwise there'd be too many data points.
 avg_crime_by_day <- merged_data_clean %>%
   group_by(days_from_dst, dst_dummy) %>%
   summarise(
@@ -108,27 +104,24 @@ avg_crime_by_day <- merged_data_clean %>%
   )
 
 property_crime_plot <- ggplot(avg_crime_by_day, aes(x = days_from_dst, avg_property_crime)) +
-  geom_point(alpha = 0.5) +
+  geom_point(alpha = 0.5, colour = "#e69a0e") +
   geom_smooth(data = filter(avg_crime_by_day, dst_dummy == 0), 
-              aes(x = days_from_dst, y = avg_property_crime), se = FALSE, colour = "blue", linewidth = 0.5) +
+              aes(x = days_from_dst, y = avg_property_crime), se = FALSE, colour = "#a011ed", linewidth = 0.5) +
   geom_smooth(data = filter(avg_crime_by_day, dst_dummy == 1), 
               aes(x = days_from_dst, y = avg_property_crime), se = FALSE, colour = "red", linewidth = 0.5) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
-  labs(title = "Avg Property Crimes Around DST", x = "Days from DST Start", y = "Property Crimes per 100k") + 
-  theme_minimal()
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "darkslategrey") +
+  labs(title = "Avg Property Crimes Around DST", x = "Days from DST Start", y = "Property Crimes per 100k")
 
 violent_crime_plot <- ggplot(avg_crime_by_day, aes(x = days_from_dst, avg_violent_crime)) +
-  geom_point(alpha = 0.5) +
+  geom_point(alpha = 0.5, colour = "#e69a0e") +
   geom_smooth(data = filter(avg_crime_by_day, dst_dummy == 0), 
-              aes(x = days_from_dst, y = avg_violent_crime), se = FALSE, colour = "blue", linewidth = 0.5) +
+              aes(x = days_from_dst, y = avg_violent_crime), se = FALSE, colour = "#a011ed", linewidth = 0.5) +
   geom_smooth(data = filter(avg_crime_by_day, dst_dummy == 1), 
               aes(x = days_from_dst, y = avg_violent_crime), se = FALSE, colour = "red", linewidth = 0.5) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
-  labs(title = "Avg Violent Crimes Around DST", x = "Days from DST Start", y = "Violent Crimes per 100k") + 
-  theme_minimal()
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "darkslategrey") +
+  labs(title = "Avg Violent Crimes Around DST", x = "Days from DST Start", y = "Violent Crimes per 100k")
 
-combined_plot <- property_crime_plot + violent_crime_plot
-print(combined_plot)
+property_crime_plot / violent_crime_plot
 
 # ---- Model Estimation ----
 
@@ -159,15 +152,14 @@ kbl(coef_table,
     digits = 3,
     caption = "Effect of DST on Crime per 100k",
     booktabs = T) %>%
-  kable_styling(latex_options = "hold_position") %>%
   add_header_above(c(" " = 1, "Statistics" = 4))
 
 # ---- Robustness Check ----
 
-model_property_cubic <- lm(num_property_crime_perht ~ poly(days_from_dst,3)*dst_dummy 
-                           + day_of_week + rain + avg_temperature, data = merged_data_clean)
-model_violent_cubic <- lm(num_violent_crime_perht ~ poly(days_from_dst,3)*dst_dummy 
-                           + day_of_week + rain + avg_temperature, data = merged_data_clean)
+model_property_cubic <- lm(num_property_crime_perht ~ poly(days_from_dst, 3, raw=TRUE)*dst_dummy +
+                             day_of_week + rain + avg_temperature, data = merged_data_clean)
+model_violent_cubic <- lm(num_violent_crime_perht ~ poly(days_from_dst, 3, raw=TRUE)*dst_dummy 
+                          + day_of_week + rain + avg_temperature, data = merged_data_clean)
 model_property_altband <- run_model("num_property_crime_perht", 14)
 model_violent_altband <- run_model("num_violent_crime_perht", 14)
 
@@ -179,24 +171,20 @@ extract_dst_coef <- function(model, model_name) {
 }
 
 coef_table <- bind_rows(
-  extract_dst_coef(model_violent, "Violent - Default"),
-  extract_dst_coef(model_property, "Property - Default"),
   extract_dst_coef(model_violent_cubic, "Violent - Cubic"),
   extract_dst_coef(model_property_cubic, "Property - Cubic"),
   extract_dst_coef(model_violent_altband, "Violent - 14 Day Bandwidth"),
   extract_dst_coef(model_property_altband, "Property - 14 Day Bandwidth")
-  ) %>%
+) %>%
   mutate(Crime_Type = ifelse(grepl("Violent", Model), "Violent", "Property"),
          Model_Type = gsub("Violent - |Property - ", "", Model)) %>%
   select(Model_Type, Crime_Type,everything(), -Model)
 
-# Create table using kable
-kbl(coef_table, 
-      col.names = c("Model", "Crime Type", "Estimate", "Std. Error", "t-statistic", "p-value"),
-      digits = 3,
-      caption = "Effect of DST Across Different Models",
-      booktabs = T,
-      linesep = "") %>%
-  kable_styling(latex_options = "hold_position") %>%
-  collapse_rows(1:2) %>%
-  add_header_above(c(" " = 2, "Statistics" = 4))
+kbl(coef_table[2:6], 
+    col.names = c("Crime Type", "Estimate", "Std. Error", "t-statistic", "p-value"),
+    digits = 3,
+    align = c('l', 'c', 'c', 'c', 'c'),
+    caption = "Effect of DST Across Different Models") %>%
+  pack_rows("Cubic Model", 1, 2) %>%
+  pack_rows("14 Day Bandwidth", 3, 4) %>%
+  add_header_above(c(" " = 1, "Statistics" = 4))
