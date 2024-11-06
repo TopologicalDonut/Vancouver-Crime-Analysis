@@ -83,26 +83,6 @@ run_model_linear <- function(outcome, bandwidth) {
 model_property <- run_model_linear("num_property_crime_perht", 21)
 model_violent <- run_model_linear("num_violent_crime_perht", 21)
 
-# vcov for robust SE.
-coef_property <- tidy(coeftest(model_property, vcov = vcovHC), conf.int = TRUE, conf.level = 0.95)
-coef_violent <- tidy(coeftest(model_violent, vcov = vcovHC), conf.int = TRUE, conf.level = 0.95)
-
-combined_results <- bind_rows(
-  coef_property %>% 
-    filter(term == "dst_dummy") %>%
-    mutate(crime_type = "Property Crime"),
-  coef_violent %>%
-    filter(term == "dst_dummy") %>%
-    mutate(crime_type = "Violent Crime")
-)
-
-# ---- Graph and Table of Results ----
-
-ggplot(combined_results, aes(y = crime_type, x = estimate)) +
-  geom_point() +
-  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), 
-                    width = 0.2)
-
 modelsummary(
   list("Property Crime" = model_property, "Violent Crime" = model_violent),
   coef_map = c("dst_dummy" = "DST Effect"),
