@@ -1,5 +1,6 @@
 library(tidyverse)
 library(lubridate)
+library(kableExtra)
 library(broom)
 library(modelsummary)
 library(sandwich)
