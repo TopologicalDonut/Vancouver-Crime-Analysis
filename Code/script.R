@@ -5,10 +5,92 @@ library(broom)
 library(modelsummary)
 library(sandwich)
 library(lmtest)
-### This is for the qmd file of my blog post.
-# library(quartoExtra)
 
-merged_data_clean <- read_csv("Data/Processed/merged_data_clean.csv")
+merged_data_clean <- read_csv("data/processed/merged_data_clean.csv")
+
+# ---- Function Definitions ----
+
+#' This function fits a linear regression designed to estimate the effect of
+#' `dst_dummy` on the specified outcome. Note that the formula is hard-coded.
+#'
+#' @param outcome     Character string of the outcome variable name.
+#' @param bandwidth   Numeric value specifying the bandwidth (number of days from DST).
+#' @param degree      Numeric value specifying the polynomial degree for `days_from_dst`.
+#'
+#' @return            An object of class `lm`.
+run_model <- function(outcome, bandwidth, degree) {
+  polynomial_term <- if (degree == 1) {
+    "days_from_dst"
+  } else {
+    paste0("poly(days_from_dst, ", degree, ", raw=TRUE)")
+  }
+  
+  formula <- as.formula(
+    paste(
+      outcome, "~",
+      polynomial_term, "* dst_dummy + day_of_week + rain + avg_temperature"
+    )
+  )
+  
+  lm(
+    formula, 
+    data = merged_data_clean, 
+    subset = abs(days_from_dst) <= bandwidth
+  )
+}
+
+#' This function returns a string label for the model type based on the polynomial degree.
+#'
+#' @param degree   Numeric value of the polynomial degree.
+#'
+#' @return         A character string representing the model type (e.g., "Linear", "Quadratic").
+get_model_type_label <- function(degree) {
+  if (degree == 1) {
+    return("Linear")
+  } else if (degree == 2) {
+    return("Quadratic")
+  } else if (degree == 3) {
+    return("Cubic")
+  } else {
+    return(paste0("Degree ", degree, " Polynomial"))
+  }
+}
+
+#' This function executes `run_model` for each outcome variable and polynomial degree,
+#' extracts the coefficient for `dst_dummy`, and compiles the results.
+#'
+#' @param outcomes     Named character vector where names are variable names in the data,
+#'                     and values are their corresponding labels.
+#' @param bandwidth.   Numeric value specifying the bandwidth (number of days from DST).
+#' @param degrees      Numeric vector of polynomial degrees to use in the models.
+#'
+#' @return             A data frame with the results for each model.
+get_models_results <- function(outcomes, bandwidth, degrees) {
+  results_list <- list()
+  
+  # Note that names(outcomes) will return the variable names,
+  # and outcomes[[outcome]] returns the labels.
+  for (outcome in names(outcomes)) {
+    crime_label <- outcomes[[outcome]]
+    
+    for (degree in degrees) {
+      model <- run_model(outcome, bandwidth, degree)
+      
+      tidy_result <- tidy(coeftest(model, vcov = vcovHC), conf.int = TRUE) %>%
+        filter(term == "dst_dummy") %>%
+        mutate(
+          crime_type = crime_label,
+          model_type = get_model_type_label(degree),
+          bandwidth = bandwidth
+        )
+      
+      results_list <- append(results_list, list(tidy_result))
+    }
+  }
+  
+  results <- bind_rows(results_list)
+  return(results)
+}
 
 # ---- Table ----
 
@@ -33,13 +115,8 @@ kbl(data_summary,
 
 # ---- Plots ----
 
-### This is also for my blog post. Not needed if running this script independently.
-# darkmode_theme_set(
-#   dark = ggthemes::theme_stata(scheme = "s1rcolor"),
-#   light = ggthemes::theme_stata(scheme = "s1color")
-# )
-
-# Grouping crime into average per day so that the graphs are readable. Otherwise there'd be too many data points.
+# Grouping crime into average per day so that the graphs are readable. Otherwise
+# there'd be too many data points.
 avg_crime_by_day <- merged_data_clean %>%
   group_by(days_from_dst, dst_dummy) %>%
   summarise(
@@ -74,14 +151,9 @@ ggplot(avg_crime_by_day_long, aes(x = days_from_dst, y = crime_rate)) +
 
 # ---- Model Estimation ----
 
-run_model_linear <- function(outcome, bandwidth) {
-  formula <- as.formula(paste(outcome, "~ days_from_dst*dst_dummy + day_of_week + rain + avg_temperature"))
-  lm(formula, data = merged_data_clean, subset = abs(days_from_dst) <= bandwidth)
-}
-
 # 3 week bandwidth for initial results.
-model_property <- run_model_linear("num_property_crime_perht", 21)
-model_violent <- run_model_linear("num_violent_crime_perht", 21)
+model_property <- run_model("num_property_crime_perht", 21, degree = 1)
+model_violent <- run_model("num_violent_crime_perht", 21, degree = 1)
 
 modelsummary(
   list("Property Crime" = model_property, "Violent Crime" = model_violent),
@@ -95,47 +167,16 @@ modelsummary(
 
 # ---- Robustness Check ----
 
-run_model_quad <- function(outcome, bandwidth) {
-  formula <- as.formula(paste(outcome, "~ poly(days_from_dst, 2, raw=TRUE)*dst_dummy +
-                             day_of_week + rain + avg_temperature"))
-  lm(formula, data = merged_data_clean, subset = abs(days_from_dst) <= bandwidth)
-}
-
-# Bandwidths are the range of days around start of DST.
+outcomes <- c(
+  num_property_crime_perht = "Property Crime",
+  num_violent_crime_perht = "Violent Crime"
+)
 bandwidths <- seq(14, 56, by = 7)
+degrees <- c(1, 2)
 
-get_models_results <- function(bandwidth) {
-  linear_prop <- run_model_linear("num_property_crime_perht", bandwidth)
-  linear_violent <- run_model_linear("num_violent_crime_perht", bandwidth)
-  quad_prop <- run_model_quad("num_property_crime_perht", bandwidth)
-  quad_violent <- run_model_quad("num_violent_crime_perht", bandwidth)
-  
-  results <- bind_rows(
-    tidy(coeftest(linear_prop, vcov = vcovHC), conf.int = TRUE) %>% 
-      filter(term == "dst_dummy") %>%
-      mutate(crime_type = "Property Crime",
-             model_type = "Linear",
-             bandwidth = bandwidth),
-    tidy(coeftest(linear_violent, vcov = vcovHC), conf.int = TRUE) %>%
-      filter(term == "dst_dummy") %>%
-      mutate(crime_type = "Violent Crime",
-             model_type = "Linear",
-             bandwidth = bandwidth),
-    tidy(coeftest(quad_prop, vcov = vcovHC), conf.int = TRUE) %>% 
-      filter(term == "dst_dummy") %>%
-      mutate(crime_type = "Property Crime",
-             model_type = "Quadratic",
-             bandwidth = bandwidth),
-    tidy(coeftest(quad_violent, vcov = vcovHC), conf.int = TRUE) %>%
-      filter(term == "dst_dummy") %>%
-      mutate(crime_type = "Violent Crime",
-             model_type = "Quadratic",
-             bandwidth = bandwidth)
-  )
-  return(results)
-}
-
-all_results <- map_dfr(bandwidths, get_models_results)
+all_results <- map_dfr(
+  bandwidths, ~ get_models_results(outcomes, .x, degrees)
+)
 
 ggplot(all_results, 
        aes(x = bandwidth, y = estimate, 
